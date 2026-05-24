@@ -21,7 +21,7 @@ llm = ChatGoogleGenerativeAI(
     temperature=0,
     max_retries=3,
     timeout=60
-),
+)
 
 class AgentState(TypedDict):
   user_prompt: str
@@ -96,6 +96,21 @@ def runtime_executor_node(state: AgentState) -> AgentState:
   new_state["status"] = "READY_FOR_COMPILATION"
   return new_state
 
+def validation_router(state: AgentState) -> str:
+  """Routes the graph based on validation status and repair counts."""
+  if state.get("status") == "VALIDATION_PASSED":
+    print("\n[ROUTER] Validation passed! Proceeding to runtime.")
+    return "runtime_executor"
+
+  repairs_attempted = state.get("metrics", {}).get("repairs", 0)
+  if repairs_attempted >= 3:
+    print(f"\n[ROUTER] Circuit Breaker Tripped! Max repairs ({repairs_attempted}) reached. Forcing exit.")
+    state["status"] = "VALIDATION_FAILED_MAX_RETRIES"
+    return "runtime_executor"
+
+  print(f"\n[ROUTER] Validation failed. Initiating repair cycle {repairs_attempted + 1}/3...")
+  return "repair_engine"
+
 graph = StateGraph(AgentState)
 
 graph.add_node("intent_extractor", intent_extractor_node)
@@ -112,7 +127,7 @@ graph.add_edge("schema_generator", "validator")
 
 graph.add_conditional_edges(
   "validator",
-  lambda s: "runtime_executor" if s.get("status") == "VALIDATION_PASSED" else "repair_engine",
+  validation_router,
   {"runtime_executor": "runtime_executor", "repair_engine": "repair_engine"}
 )
 
