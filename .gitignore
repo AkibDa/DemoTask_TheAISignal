@@ -1,0 +1,15 @@
+.env
+.idea
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+*.bak
+*.swp
+*.swo
+*.tmp
+*.DS_Store

@@ -4,7 +4,7 @@ import pathlib
 from typing import TypedDict, Optional, Dict
 from dotenv import load_dotenv
 from langchain_core.globals import set_verbose, set_debug
-from langchain_groq.chat_models import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 
 from .prompt import *
@@ -16,7 +16,12 @@ _ = load_dotenv()
 set_debug(True)
 set_verbose(True)
 
-llm = ChatGroq(model="openai/gpt-oss-120b", timeout=60, max_retries=3, temperature=0)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    temperature=0,
+    max_retries=3,
+    timeout=60
+),
 
 class AgentState(TypedDict):
   user_prompt: str
