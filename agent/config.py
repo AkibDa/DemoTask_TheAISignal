@@ -7,7 +7,7 @@ from langchain_ollama import ChatOllama
 
 def get_llm() -> ChatOllama:
   return ChatOllama(
-    model="qwen2.5",
+    model="qwen2.5-coder:1.5b ",
     temperature=0,
   )
 
