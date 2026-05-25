@@ -1,0 +1,17 @@
+{
+  "case_id": 7,
+  "category": "standard",
+  "description": "Restaurant POS and ordering system",
+  "final_status": "COMPILATION_COMPLETE",
+  "validation_passed": true,
+  "consistency_score": 100,
+  "deterministic_passed": false,
+  "repair_cycles": 2,
+  "runtime_success_rate": 100.0,
+  "assumptions_made": 4,
+  "n_entities": 5,
+  "n_endpoints": 9,
+  "score_meets_threshold": true,
+  "elapsed_seconds": 161.99,
+  "error": null
+}

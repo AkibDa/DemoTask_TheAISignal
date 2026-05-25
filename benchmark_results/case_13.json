@@ -1,0 +1,17 @@
+{
+  "case_id": 13,
+  "category": "edge",
+  "description": "Contradictory requirements",
+  "final_status": "COMPILATION_COMPLETE",
+  "validation_passed": true,
+  "consistency_score": 83,
+  "deterministic_passed": false,
+  "repair_cycles": 2,
+  "runtime_success_rate": 83.3,
+  "assumptions_made": 0,
+  "n_entities": 4,
+  "n_endpoints": 6,
+  "score_meets_threshold": true,
+  "elapsed_seconds": 108.5,
+  "error": null
+}
