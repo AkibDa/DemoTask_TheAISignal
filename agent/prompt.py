@@ -78,6 +78,7 @@ Generate ONLY the `api_schema` (list of EndpointSchema objects).
 CRITICAL ROLE CONSTRAINTS:
 Roles MUST be nouns describing human actors only (e.g., 'admin', 'student').
 Actions like 'create_courses' are NOT roles.
+All routes MUST begin with '/'
 
 RULES:
 - Every `request_fields` entry MUST be a field name that exists in the DB schema below.
