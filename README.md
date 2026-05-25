@@ -47,7 +47,7 @@ streamlit run app.py
 7. Simulate runtime endpoint behavior (`RuntimeReport`)
 
 ## Architecture diagram
-```mermaid
+```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                           APP COMPILER SYSTEM ARCHITECTURE                           │
 │                      Zero-to-Architecture Pipeline with Self-Repair                  │
