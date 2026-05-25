@@ -17,32 +17,90 @@ User request:
 def architecture_designer_prompt(intent_ir: str) -> str:
     return f"""
 You are the ARCHITECTURE DESIGNER compiler pass.
-Based on the following IntentIR, generate the System Architecture IR (Entities, Pages, Workflows).
+Based on the IntentIR below, generate a CONCISE System Architecture IR.
+
+STRICT LIMITS — do not exceed these:
+- Entities : maximum 6  (only core domain tables, no junction/audit tables yet)
+- Pages    : maximum 8  (group related actions into one page)
+- Workflows: maximum 5  (only the primary user journeys)
 
 RULES:
 - Entities must represent physical database tables later.
-- Pages must align with the target users; include `allowed_roles` for each page.
+- Pages must align with target users; include `allowed_roles` for each page.
 - Workflows must connect Pages and Entities.
-- Maintain deterministic entity naming (PascalCase for Entities).
+- Use PascalCase for entity names.
+- Stay within the limits above — quality over quantity.
 
 Intent IR:
 {intent_ir}
 """
 
-def schema_generator_prompt(architecture_ir: str) -> str:
+def db_schema_prompt(architecture_ir: str) -> str:
     return f"""
-You are the SCHEMA GENERATOR compiler pass.
-Translate the Architecture IR into strict, interconnected system schemas (DB, API, UI, Auth).
+You are the DB SCHEMA compiler pass.
+Generate ONLY the `db_schema` (list of TableSchema objects) for the architecture below.
 
-CRITICAL RULES:
-1. DB: Every Entity in the Architecture IR must become a TableSchema. Use snake_case for field names.
-2. API: Every endpoint's `request_fields` MUST exactly match field names that exist in at least one DB TableSchema.
-3. API: Every endpoint MUST declare `allowed_roles` drawn only from the AuthSchema roles list.
-4. UI: Every UIComponent MUST have a `bound_endpoint` referencing an existing "METHOD /route" string (e.g. "POST /auth/login").
-5. UI: Every UIComponent `fields` list MUST only contain field names that exist in the DB schema.
-6. Auth: Every role declared in AuthSchema MUST be referenced in at least one API endpoint's `allowed_roles`.
+RULES:
+- Every Entity becomes exactly one TableSchema. Use snake_case for field names.
+- Include standard fields: id (integer, required), created_at (datetime, required).
+- Add only fields that are logically necessary — do not pad.
+- Output a JSON array of TableSchema objects only.
 
-Failure to follow these rules will trigger the repair engine.
+Architecture IR:
+{architecture_ir}
+"""
+
+def api_schema_prompt(architecture_ir: str, db_schema_json: str) -> str:
+    return f"""
+You are the API SCHEMA compiler pass.
+Generate ONLY the `api_schema` (list of EndpointSchema objects).
+
+RULES:
+- Every `request_fields` entry MUST be a field name that exists in the DB schema below.
+- Include standard CRUD endpoints for each DB table (GET list, GET detail, POST, PUT, DELETE).
+- Every endpoint MUST declare `allowed_roles` from this list only: roles found in the Architecture IR.
+- Use RESTful routes: /resource, /resource/{{id}}.
+- Output a JSON array of EndpointSchema objects only.
+
+DB Schema (for field reference):
+{db_schema_json}
+
+Architecture IR:
+{architecture_ir}
+"""
+
+def auth_schema_prompt(architecture_ir: str) -> str:
+    return f"""
+You are the AUTH SCHEMA compiler pass.
+Generate ONLY the `auth_schema` (a single AuthSchema object).
+
+RULES:
+- `roles` must match exactly the roles declared in the Architecture IR — no new roles.
+- `permissions` maps each role to a list of allowed HTTP method+route strings (e.g. "GET /users").
+- Be explicit and complete.
+- Output a single AuthSchema JSON object only.
+
+Architecture IR:
+{architecture_ir}
+"""
+
+def ui_schema_prompt(architecture_ir: str, api_schema_json: str, db_schema_json: str) -> str:
+    return f"""
+You are the UI SCHEMA compiler pass.
+Generate ONLY the `ui_schema` (list of UISchema objects — one per Page in the Architecture IR).
+
+RULES:
+- One UISchema per Page.
+- Each UIComponent's `bound_endpoint` MUST be a "METHOD /route" string that exists in the API schema below.
+- Each UIComponent's `fields` list MUST only contain field names from the DB schema below.
+- `state_variables` should reflect what the page needs in client state.
+- Output a JSON array of UISchema objects only.
+
+API Schema (for endpoint reference):
+{api_schema_json}
+
+DB Schema (for field reference):
+{db_schema_json}
 
 Architecture IR:
 {architecture_ir}
