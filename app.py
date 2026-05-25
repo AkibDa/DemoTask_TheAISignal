@@ -9,7 +9,6 @@ import pandas as pd
 st.set_page_config(page_title="App Compiler System", layout="wide")
 st.title("⚙️ System Compiler: Interactive Demo Viewer")
 
-# Define our benchmark cases and their default prompts for the Demo Viewer
 BENCHMARKS = {
   "LMS": {
     "file": "demos/lms.json",
@@ -29,20 +28,13 @@ BENCHMARKS = {
   }
 }
 
-
-# Helper for dict access
 def dict_get(obj, key, default=None):
   if isinstance(obj, dict):
     return obj.get(key, default)
   return getattr(obj, key, default)
 
-
-# Create main tabs for the application
 tab_demo, tab_benchmarks = st.tabs(["🔍 Interactive Demo Viewer", "📊 Benchmark Dashboard"])
 
-# ==========================================
-# TAB 1: INTERACTIVE DEMO VIEWER
-# ==========================================
 with tab_demo:
   with st.sidebar:
     st.header("Viewer Settings")
@@ -82,7 +74,6 @@ with tab_demo:
     pipeline_placeholder = st.empty()
     status_placeholder.info("Loading Saved Benchmark Data…")
 
-    # Simulate processing time for polish
     time.sleep(1.2)
 
     try:
@@ -238,10 +229,6 @@ with tab_demo:
 
       status_placeholder.error(f"Compilation Error: {e}")
       st.code(traceback.format_exc())
-
-# ==========================================
-# TAB 2: BENCHMARK DASHBOARD
-# ==========================================
 with tab_benchmarks:
   st.header("Aggregate Benchmark Performance")
   st.markdown("Scans the `benchmark_results` directory to compare pipeline runs.")
@@ -251,7 +238,6 @@ with tab_benchmarks:
   if not os.path.exists(benchmark_dir):
     st.warning(f"Directory `{benchmark_dir}` not found. Please create it and add your JSON benchmark files.")
   else:
-    # Load all JSON files in the directory
     all_results = []
     for filename in os.listdir(benchmark_dir):
       if filename.endswith(".json"):
@@ -259,7 +245,6 @@ with tab_benchmarks:
         try:
           with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # Only add if it looks like a benchmark result
             if "description" in data and "consistency_score" in data:
               all_results.append(data)
         except Exception as e:
@@ -268,20 +253,17 @@ with tab_benchmarks:
     if not all_results:
       st.info(f"No valid benchmark JSON files found in `{benchmark_dir}`.")
     else:
-      # Convert to Pandas DataFrame for easy manipulation
       df = pd.DataFrame(all_results)
 
-      # Reorder and rename columns for a cleaner display if they exist
       display_cols = [
         "case_id", "category", "description", "consistency_score",
         "runtime_success_rate", "repair_cycles", "elapsed_seconds",
         "validation_passed", "deterministic_passed"
       ]
-      # Keep only columns that actually exist in the dataframe
+
       existing_cols = [col for col in display_cols if col in df.columns]
       df_display = df[existing_cols].sort_values("case_id")
 
-      # --- High Level Metrics ---
       avg_consistency = df["consistency_score"].mean()
       avg_runtime = df["runtime_success_rate"].mean()
       avg_time = df["elapsed_seconds"].mean()
@@ -293,12 +275,10 @@ with tab_benchmarks:
 
       st.divider()
 
-      # --- Visualizations ---
       col_chart1, col_chart2 = st.columns(2)
 
       with col_chart1:
         st.subheader("Consistency vs. Runtime Success")
-        # Set index to description so labels show up correctly on the X-axis
         chart_data = df.set_index("description")[["consistency_score", "runtime_success_rate"]]
         st.bar_chart(chart_data)
 
@@ -309,6 +289,5 @@ with tab_benchmarks:
 
       st.divider()
 
-      # --- Raw Data Table ---
       st.subheader("Raw Benchmark Data")
       st.dataframe(df_display, use_container_width=True, hide_index=True)
