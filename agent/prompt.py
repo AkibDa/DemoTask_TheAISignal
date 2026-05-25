@@ -75,12 +75,17 @@ def api_schema_prompt(architecture_ir: str, db_schema_json: str) -> str:
 You are the API SCHEMA compiler pass.
 Generate ONLY the `api_schema` (list of EndpointSchema objects).
 
+CRITICAL ROLE CONSTRAINTS:
+Roles MUST be nouns describing human actors only (e.g., 'admin', 'student').
+Actions like 'create_courses' are NOT roles.
+
 RULES:
 - Every `request_fields` entry MUST be a field name that exists in the DB schema below.
 - Include standard CRUD endpoints for each DB table.
-- DELETE endpoints MUST return at least one response field (e.g., ["message"]). Do not leave response_fields empty for DELETE.
+- DELETE endpoints MUST return at least one response field (e.g., ["message"]).
 - Every endpoint MUST declare `allowed_roles` from this list only: roles found in the Architecture IR.
 - Use RESTful routes: /resource, /resource/{{id}}.
+- Output a JSON array of EndpointSchema objects only.
 
 DB Schema (for field reference):
 {db_schema_json}
@@ -93,6 +98,11 @@ def auth_schema_prompt(architecture_ir: str) -> str:
     return f"""
 You are the AUTH SCHEMA compiler pass.
 Generate ONLY the `auth_schema` (a single AuthSchema object).
+
+CRITICAL ROLE CONSTRAINTS:
+Roles MUST be nouns describing human actors only (e.g., 'admin', 'student', 'instructor').
+INVALID role examples: 'create_courses', 'approve_courses', 'track_progress'.
+Do NOT use actions or features as roles.
 
 RULES:
 - `roles` must match exactly the roles declared in the Architecture IR — no new roles.
