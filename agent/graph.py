@@ -31,22 +31,23 @@ from .tools import (
     deterministic_consistency_score,
     run_runtime_simulation,
 )
-from .config import invoke_with_rotation
+from .config import invoke_with_retry
 
 _ = load_dotenv()
 set_debug(False)
 set_verbose(False)
 
+
 def _call(schema, prompt: str, label: str = ""):
-    """Single wrapper: key-rotation + a short label for tracing."""
-    if label:
-        print(f"    → {label}…")
-    return invoke_with_rotation(schema, prompt, timeout=90)
+  """Single wrapper for tracing local model calls."""
+  if label:
+    print(f"    → {label} [⚡ Local/Ollama]…")
+  return invoke_with_retry(schema, prompt)
 
 
 def _log(state: dict, msg: str) -> None:
-    state.setdefault("pipeline_log", []).append(msg)
-    print(msg)
+  state.setdefault("pipeline_log", []).append(msg)
+  print(msg)
 
 class AgentState(TypedDict):
     user_prompt: str
@@ -62,91 +63,115 @@ class AgentState(TypedDict):
     metrics: Dict[str, int]
     pipeline_log: List[str]
 
-def intent_extractor_node(state: AgentState) -> AgentState:
-    new_state = dict(state)
-    new_state.setdefault("metrics", {"repairs": 0, "retries": 0})
-    new_state.setdefault("pipeline_log", [])
-    new_state.setdefault("repair_history", [])
-    _log(new_state, "\n--- [PASS 1] INTENT EXTRACTOR ---")
 
-    resp = _call(IntentIR, intent_extractor_prompt(new_state["user_prompt"]), "extracting intent")
-    new_state["intent_ir"] = resp
-    new_state["status"] = "INTENT_EXTRACTED"
-    _log(new_state, f"✓ Intent: {resp.app_type} | roles={resp.roles} | assumptions={len(resp.assumptions)}")
-    return new_state
+def intent_extractor_node(state: AgentState) -> AgentState:
+  new_state = dict(state)
+  new_state.setdefault("metrics", {"repairs": 0, "retries": 0})
+  new_state.setdefault("pipeline_log", [])
+  new_state.setdefault("repair_history", [])
+  _log(new_state, "\n--- [PASS 1] INTENT EXTRACTOR ---")
+
+  resp = _call(IntentIR, intent_extractor_prompt(new_state["user_prompt"]), "extracting intent")
+  new_state["intent_ir"] = resp
+  new_state["status"] = "INTENT_EXTRACTED"
+  _log(new_state, f"✓ Intent: {resp.app_type} | roles={resp.roles} | assumptions={len(resp.assumptions)}")
+  return new_state
+
 
 def architecture_designer_node(state: AgentState) -> AgentState:
-    new_state = dict(state)
-    _log(new_state, "\n--- [PASS 2] ARCHITECTURE DESIGNER ---")
-    ir_json = new_state["intent_ir"].model_dump_json(indent=2)
+  new_state = dict(state)
+  _log(new_state, "\n--- [PASS 2] ARCHITECTURE DESIGNER ---")
+  ir_json = new_state["intent_ir"].model_dump_json(indent=2)
 
-    resp: ArchitectureIR = _call(
-        ArchitectureIR, architecture_designer_prompt(ir_json), "designing architecture"
-    )
+  # Route to cheap local model
+  resp: ArchitectureIR = _call(
+    ArchitectureIR, architecture_designer_prompt(ir_json), "designing architecture"
+  )
 
-    resp.entities  = resp.entities[:6]
-    resp.pages     = resp.pages[:8]
-    resp.workflows = resp.workflows[:5]
+  resp.entities = resp.entities[:6]
+  resp.pages = resp.pages[:8]
+  resp.workflows = resp.workflows[:5]
 
-    new_state["architecture_ir"] = resp
-    new_state["status"] = "ARCHITECTURE_DESIGNED"
-    _log(new_state, (
-        f"✓ Architecture: {len(resp.entities)} entities | "
-        f"{len(resp.pages)} pages | {len(resp.workflows)} workflows"
-    ))
-    return new_state
+  new_state["architecture_ir"] = resp
+  new_state["status"] = "ARCHITECTURE_DESIGNED"
+  _log(new_state, (
+    f"✓ Architecture: {len(resp.entities)} entities | "
+    f"{len(resp.pages)} pages | {len(resp.workflows)} workflows"
+  ))
+  return new_state
 
 def schema_generator_node(state: AgentState) -> AgentState:
-    new_state = dict(state)
+  new_state = dict(state)
+  arch_json = new_state["architecture_ir"].model_dump_json(indent=2)
+
+  repair_target = None
+  if new_state.get("repair_plan"):
+    repair_target = new_state["repair_plan"].target_layer
+    _log(new_state, f"\n--- [PASS 3] SCHEMA GENERATOR (Targeted Patch: {repair_target}) ---")
+  else:
     _log(new_state, "\n--- [PASS 3] SCHEMA GENERATOR (split calls) ---")
-    arch_json = new_state["architecture_ir"].model_dump_json(indent=2)
 
-    class _DBOnly(TypedDict):
-        db_schema: List[TableSchema]
+  existing_schemas = new_state.get("system_schemas")
 
-    from pydantic import BaseModel
-    class DBOnly(BaseModel):
-        db_schema: List[TableSchema]
+  from pydantic import BaseModel
+  class _DBOnly(BaseModel):
+    db_schema: List[TableSchema]
 
-    db_result: DBOnly = _call(DBOnly, db_schema_prompt(arch_json), "generating DB schema")
-    db_json = json.dumps([t.model_dump() for t in db_result.db_schema], indent=2)
-    _log(new_state, f"  ✓ DB: {len(db_result.db_schema)} tables")
+  class _AuthOnly(BaseModel):
+    auth_schema: AuthSchema
 
-    class AuthOnly(BaseModel):
-        auth_schema: AuthSchema
+  class _APIOnly(BaseModel):
+    api_schema: List[EndpointSchema]
 
-    auth_result: AuthOnly = _call(AuthOnly, auth_schema_prompt(arch_json), "generating Auth schema")
-    _log(new_state, f"  ✓ Auth: {len(auth_result.auth_schema.roles)} roles")
+  class _UIOnly(BaseModel):
+    ui_schema: List[UISchema]
 
-    class APIOnly(BaseModel):
-        api_schema: List[EndpointSchema]
+  if not existing_schemas or repair_target in ("DB", "Cross-Layer"):
+    db_result = _call(_DBOnly, db_schema_prompt(arch_json), "generating DB schema")
+    db_schema = db_result.db_schema
+    _log(new_state, f"  ✓ DB: {len(db_schema)} tables (Regenerated)")
+  else:
+    db_schema = existing_schemas.db_schema
+    _log(new_state, "  ✓ DB: [Cached]")
 
-    api_result: APIOnly = _call(
-        APIOnly,
-        api_schema_prompt(arch_json, db_json),
-        "generating API schema"
-    )
-    api_json = json.dumps([e.model_dump() for e in api_result.api_schema], indent=2)
-    _log(new_state, f"  ✓ API: {len(api_result.api_schema)} endpoints")
+  if not existing_schemas or repair_target in ("Auth", "Cross-Layer"):
+    auth_result = _call(_AuthOnly, auth_schema_prompt(arch_json), "generating Auth schema")
+    auth_schema = auth_result.auth_schema
+    _log(new_state, f"  ✓ Auth: {len(auth_schema.roles)} roles (Regenerated)")
+  else:
+    auth_schema = existing_schemas.auth_schema
+    _log(new_state, "  ✓ Auth: [Cached]")
 
-    class UIOnly(BaseModel):
-        ui_schema: List[UISchema]
+  db_json = json.dumps([t.model_dump() for t in db_schema], indent=2)
 
-    ui_result: UIOnly = _call(
-        UIOnly,
-        ui_schema_prompt(arch_json, api_json, db_json),
-        "generating UI schema"
-    )
-    _log(new_state, f"  ✓ UI: {len(ui_result.ui_schema)} pages")
+  if not existing_schemas or repair_target in ("API", "Cross-Layer"):
+    api_result = _call(_APIOnly, api_schema_prompt(arch_json, db_json), "generating API schema")
+    api_schema = api_result.api_schema
+    _log(new_state, f"  ✓ API: {len(api_schema)} endpoints (Regenerated)")
+  else:
+    api_schema = existing_schemas.api_schema
+    _log(new_state, "  ✓ API: [Cached]")
 
-    new_state["system_schemas"] = SystemSchemas(
-        db_schema=db_result.db_schema,
-        api_schema=api_result.api_schema,
-        ui_schema=ui_result.ui_schema,
-        auth_schema=auth_result.auth_schema,
-    )
-    new_state["status"] = "SCHEMAS_GENERATED"
-    return new_state
+  api_json = json.dumps([e.model_dump() for e in api_schema], indent=2)
+
+  if not existing_schemas or repair_target in ("UI", "Cross-Layer"):
+    ui_result = _call(_UIOnly, ui_schema_prompt(arch_json, api_json, db_json), "generating UI schema")
+    ui_schema = ui_result.ui_schema
+    _log(new_state, f"  ✓ UI: {len(ui_schema)} pages (Regenerated)")
+  else:
+    ui_schema = existing_schemas.ui_schema
+    _log(new_state, "  ✓ UI: [Cached]")
+
+  new_state["system_schemas"] = SystemSchemas(
+    db_schema=db_schema,
+    api_schema=api_schema,
+    ui_schema=ui_schema,
+    auth_schema=auth_schema,
+  )
+
+  new_state["repair_plan"] = None
+  new_state["status"] = "SCHEMAS_GENERATED"
+  return new_state
 
 def validator_node(state: AgentState) -> AgentState:
     new_state = dict(state)
@@ -166,9 +191,9 @@ def validator_node(state: AgentState) -> AgentState:
         f"Missing DB tables   : {det_check.missing_db_tables or 'none'}"
     )
     resp: ValidationReport = _call(
-        ValidationReport,
-        validator_prompt(schemas.model_dump_json(indent=2), det_summary),
-        "running semantic validation"
+      ValidationReport,
+      validator_prompt(schemas.model_dump_json(indent=2), det_summary),
+      "running semantic validation"
     )
     resp.deterministic_check = det_check
 
@@ -227,7 +252,12 @@ def repair_engine_node(state: AgentState) -> AgentState:
     }
     prompt = prompt_map.get(target, repair_engine_prompt(schemas_json, report_json, target))
 
-    resp: RepairPlan = _call(RepairPlan, prompt, f"repairing {target} layer")
+    resp: RepairPlan = _call(
+      RepairPlan,
+      prompt,
+      f"repairing {target} layer"
+    )
+
     new_state["repair_plan"] = resp
     new_state["metrics"]["repairs"] += 1
 
