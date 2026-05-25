@@ -1,13 +1,29 @@
 # agent/prompt.py
 
 def intent_extractor_prompt(user_prompt: str) -> str:
-    return f"""
+  return f"""
 You are the INTENT EXTRACTOR compiler pass. Convert the raw user prompt into a structured IntentIR.
+
+IMPORTANT:
+Roles are HUMAN ACTOR TYPES only.
+
+Examples of VALID roles:
+- student
+- instructor
+- admin
+- customer
+
+Examples of INVALID roles:
+- create_courses
+- track_progress
+- approve_courses
+
+Features/actions must NEVER appear inside the roles list.
 
 RULES:
 - Never invent features not requested or logically required.
-- Identify all implicit user roles.
-- If the prompt is vague, populate the 'assumptions' field explicitly (e.g. "Assuming JWT auth", "Assuming Stripe for payments").
+- Identify all implicit user roles strictly based on the human actor types above.
+- If the prompt is vague, populate the 'assumptions' field explicitly.
 - Output valid JSON only matching the schema.
 
 User request:
@@ -15,21 +31,25 @@ User request:
 """
 
 def architecture_designer_prompt(intent_ir: str) -> str:
-    return f"""
+  return f"""
 You are the ARCHITECTURE DESIGNER compiler pass.
 Based on the IntentIR below, generate a CONCISE System Architecture IR.
 
-STRICT LIMITS — do not exceed these:
-- Entities : maximum 6  (only core domain tables, no junction/audit tables yet)
+STRUCTURAL MINIMUMS:
+For multi-user SaaS or web systems, you MUST include:
+- At least one User entity (e.g., 'User', 'Account').
+- At least one domain content entity (e.g., 'Course', 'Product', 'Ticket').
+- At least one relationship entity if users interact with content (e.g., 'Enrollment', 'Order').
+
+STRICT LIMITS:
+- Entities : maximum 6  (only core domain tables)
 - Pages    : maximum 8  (group related actions into one page)
 - Workflows: maximum 5  (only the primary user journeys)
 
 RULES:
-- Entities must represent physical database tables later.
-- Pages must align with target users; include `allowed_roles` for each page.
+- Entities must represent physical database tables later. Use PascalCase.
+- Pages must align with target users; include `allowed_roles`.
 - Workflows must connect Pages and Entities.
-- Use PascalCase for entity names.
-- Stay within the limits above — quality over quantity.
 
 Intent IR:
 {intent_ir}
@@ -51,16 +71,16 @@ Architecture IR:
 """
 
 def api_schema_prompt(architecture_ir: str, db_schema_json: str) -> str:
-    return f"""
+  return f"""
 You are the API SCHEMA compiler pass.
 Generate ONLY the `api_schema` (list of EndpointSchema objects).
 
 RULES:
 - Every `request_fields` entry MUST be a field name that exists in the DB schema below.
-- Include standard CRUD endpoints for each DB table (GET list, GET detail, POST, PUT, DELETE).
+- Include standard CRUD endpoints for each DB table.
+- DELETE endpoints MUST return at least one response field (e.g., ["message"]). Do not leave response_fields empty for DELETE.
 - Every endpoint MUST declare `allowed_roles` from this list only: roles found in the Architecture IR.
 - Use RESTful routes: /resource, /resource/{{id}}.
-- Output a JSON array of EndpointSchema objects only.
 
 DB Schema (for field reference):
 {db_schema_json}
