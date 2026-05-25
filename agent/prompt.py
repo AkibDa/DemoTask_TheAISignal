@@ -87,6 +87,12 @@ RULES:
 - Use RESTful routes: /resource, /resource/{{id}}.
 - Output a JSON array of EndpointSchema objects only.
 
+For MVP generation:
+- Focus on READ endpoints first (GET)
+- Write endpoints (POST/PUT/DELETE) are optional for initial validation
+- Don't require full CRUD for every entity
+- 3-5 endpoints is acceptable for complex entities
+
 DB Schema (for field reference):
 {db_schema_json}
 
