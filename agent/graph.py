@@ -37,24 +37,20 @@ _ = load_dotenv()
 set_debug(False)
 set_verbose(False)
 
-
 def _call(schema, prompt: str, label: str = ""):
   """Single wrapper for tracing local model calls."""
   if label:
     print(f"    → {label} [⚡ Local/Ollama]…")
   return invoke_with_retry(schema, prompt)
 
-
 def _log(state: dict, msg: str) -> None:
   state.setdefault("pipeline_log", []).append(msg)
   print(msg)
-
 
 def _normalize_patch_operation(operation: str, target: str, field_name: str = "") -> str:
   """Map fuzzy LLM outputs to valid operations."""
   op = operation.lower().strip()
 
-  # Direct matches
   valid_ops = {
     "add_field", "remove_field", "add_endpoint", "remove_endpoint",
     "add_role", "remove_role", "bind_component", "bind_role_to_endpoint"
@@ -63,9 +59,7 @@ def _normalize_patch_operation(operation: str, target: str, field_name: str = ""
   if op in valid_ops:
     return op
 
-  # Fuzzy mappings
   if op == "add":
-    # Infer based on target and field_name
     if field_name and ("field" in target.lower() or "column" in target.lower()):
       return "add_field"
     elif field_name and ("role" in target.lower() or "permission" in target.lower()):
@@ -89,17 +83,14 @@ def _normalize_patch_operation(operation: str, target: str, field_name: str = ""
   if op == "delete":
     return "remove_endpoint"
 
-  # Log unknown operation but default to a safe fallback
   print(f"    [PATCH NORMALIZATION] Unknown op '{op}' → defaulting to 'add_field'")
   return "add_field"
-
 
 def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
   """Deterministically mutates the schema state based on LLM patch instructions."""
   from .states import EndpointSchema, TableField
 
   for patch in plan.patches:
-    # Normalize the operation first
     normalized_op = _normalize_patch_operation(
       patch.operation,
       patch.target_table_or_route,
@@ -108,7 +99,6 @@ def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
 
     target = patch.target_table_or_route.lower()
 
-    # ADD FIELD
     if normalized_op == "add_field":
       found = False
       for table in schemas.db_schema:
@@ -124,13 +114,11 @@ def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
       if not found:
         print(f"    [PATCH WARNING] Table '{target}' not found for add_field")
 
-    # REMOVE FIELD
     elif normalized_op == "remove_field":
       for table in schemas.db_schema:
         if table.table_name.lower() == target:
           table.fields = [f for f in table.fields if f.name != patch.field_name]
 
-    # ADD ENDPOINT
     elif normalized_op == "add_endpoint":
       parts = target.split(" ")
       method = parts[0].upper() if len(parts) > 1 else "GET"
@@ -146,7 +134,6 @@ def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
           allowed_roles=[]
         ))
 
-    # REMOVE ENDPOINT
     elif normalized_op == "remove_endpoint":
       parts = target.split(" ")
       if len(parts) == 2:
@@ -155,17 +142,14 @@ def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
           if not (e.method == parts[0] and e.route == parts[1])
         ]
 
-    # ADD ROLE
     elif normalized_op == "add_role":
       if patch.field_name and patch.field_name not in schemas.auth_schema.roles:
         schemas.auth_schema.roles.append(patch.field_name)
 
-    # REMOVE ROLE
     elif normalized_op == "remove_role":
       if target in schemas.auth_schema.roles:
         schemas.auth_schema.roles.remove(target)
 
-    # BIND COMPONENT
     elif normalized_op == "bind_component":
       for page in schemas.ui_schema:
         if page.page_route == target:
@@ -173,7 +157,6 @@ def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
             if comp.name == patch.field_name:
               comp.bound_endpoint = patch.field_type
 
-    # BIND ROLE TO ENDPOINT
     elif normalized_op == "bind_role_to_endpoint":
       parts = target.split(" ")
       if len(parts) >= 2:
@@ -186,7 +169,6 @@ def _apply_patches(schemas: SystemSchemas, plan: RepairPlan) -> None:
 
     else:
       print(f"    [PATCH WARNING] Unsupported operation after normalization: '{normalized_op}'")
-
 
 def _sanitize_roles(roles: list[str]) -> list[str]:
   """Deterministically strips actions/verbs from role arrays."""
@@ -213,14 +195,12 @@ def _sanitize_roles(roles: list[str]) -> list[str]:
 
   return list(clean_roles)
 
-
 def _detect_stall(state: dict, current_score: int) -> bool:
   """Check if repairs are making progress. Returns True if stalled."""
   repairs = state.get("metrics", {}).get("repairs", 0)
   previous_score = state.get("previous_score", 0)
 
   if repairs >= 2 and current_score <= previous_score + 5:
-    # Stalled → force accept current state
     state["status"] = "VALIDATION_PASSED"
     if state.get("validation_report"):
       state["validation_report"].is_valid = True
@@ -229,12 +209,10 @@ def _detect_stall(state: dict, current_score: int) -> bool:
     return True
   return False
 
-
 def _repairable_failures(det_check: DeterministicCheckResult, validation_report: ValidationReport) -> List[tuple]:
   """Map validation failures to repair capabilities."""
   repairable = []
 
-  # Check deterministic failures for repairability
   if det_check.missing_api_fields:
     repairable.append(("API", "add_field"))
   if det_check.missing_db_tables:
@@ -244,12 +222,10 @@ def _repairable_failures(det_check: DeterministicCheckResult, validation_report:
   if det_check.ui_binding_errors:
     repairable.append(("UI", "bind_component"))
 
-  # If nothing is repairable but validation failed → force cross-layer
   if not repairable and not validation_report.is_valid:
     repairable.append(("Cross-Layer", "regenerate"))
 
   return repairable
-
 
 class AgentState(TypedDict):
   user_prompt: str
@@ -267,7 +243,6 @@ class AgentState(TypedDict):
   previous_score: int
   escalate_repair: bool
 
-
 def intent_extractor_node(state: AgentState) -> AgentState:
   new_state = dict(state)
   new_state.setdefault("metrics", {"repairs": 0, "retries": 0})
@@ -280,7 +255,6 @@ def intent_extractor_node(state: AgentState) -> AgentState:
   new_state["status"] = "INTENT_EXTRACTED"
   _log(new_state, f"✓ Intent: {resp.app_type} | roles={resp.roles} | assumptions={len(resp.assumptions)}")
   return new_state
-
 
 def intent_sanitizer_node(state: AgentState) -> AgentState:
   new_state = dict(state)
@@ -301,7 +275,6 @@ def intent_sanitizer_node(state: AgentState) -> AgentState:
 
   return new_state
 
-
 def architecture_designer_node(state: AgentState) -> AgentState:
   new_state = dict(state)
   _log(new_state, "\n--- [PASS 2] ARCHITECTURE DESIGNER ---")
@@ -310,7 +283,6 @@ def architecture_designer_node(state: AgentState) -> AgentState:
   resp: ArchitectureIR = _call(
     ArchitectureIR, architecture_designer_prompt(ir_json), "designing architecture"
   )
-
   resp.entities = resp.entities[:6]
   resp.pages = resp.pages[:8]
   resp.workflows = resp.workflows[:5]
@@ -322,7 +294,6 @@ def architecture_designer_node(state: AgentState) -> AgentState:
     f"{len(resp.pages)} pages | {len(resp.workflows)} workflows"
   ))
   return new_state
-
 
 def schema_generator_node(state: AgentState) -> AgentState:
   new_state = dict(state)
@@ -397,7 +368,6 @@ def schema_generator_node(state: AgentState) -> AgentState:
   new_state["status"] = "SCHEMAS_GENERATED"
   return new_state
 
-
 def validator_node(state: AgentState) -> AgentState:
   new_state = dict(state)
   _log(new_state, "\n--- [PASS 4] SCHEMA VALIDATOR ---")
@@ -422,13 +392,10 @@ def validator_node(state: AgentState) -> AgentState:
   )
   resp.deterministic_check = det_check
 
-  # FIX 1: Re-balanced scoring for MVP mode
   if len(resp.issues) == 0:
-    # Semantic validator is happy → trust it, boost to at least 75
     blended = max(det_score, 75)
     _log(new_state, f"  ✨ No semantic issues! Boosting score from {det_score} to {blended}")
   else:
-    # Issues exist → blend more generously (60/40 instead of 80/20)
     blended = int((det_score * 0.6) + (resp.consistency_score * 0.4))
 
   resp.consistency_score = blended
@@ -437,7 +404,6 @@ def validator_node(state: AgentState) -> AgentState:
   current_score = blended
   previous_score = new_state.get("previous_score", 0)
 
-  # FIX 2: Stall detection
   if _detect_stall(new_state, current_score):
     return new_state
 
@@ -450,20 +416,16 @@ def validator_node(state: AgentState) -> AgentState:
 
   new_state["previous_score"] = current_score
 
-  # FIX 3: More forgiving validation PASS logic
   validation_passed = False
 
-  # Case 1: Semantic validator found NO issues → force pass for MVP
   if len(resp.issues) == 0:
     validation_passed = True
     _log(new_state, f"  ✅ VALIDATION PASSED: 0 semantic issues (score={blended})")
 
-  # Case 2: Traditional pass with good score and deterministic checks
   elif resp.is_valid and blended >= 65 and det_check.passed:
     validation_passed = True
     _log(new_state, f"  ✅ VALIDATION PASSED: score={blended}, det_passed={det_check.passed}")
 
-  # Case 3: Runtime success can override
   elif new_state.get("runtime_report") and new_state["runtime_report"].success_rate >= 70:
     validation_passed = True
     _log(new_state, f"  ✅ VALIDATION PASSED: runtime success ({new_state['runtime_report'].success_rate}%) overriding")
@@ -478,19 +440,16 @@ def validator_node(state: AgentState) -> AgentState:
 
   return new_state
 
-
 def _dominant_layer(state: AgentState) -> str:
   """Determine which layer needs repair based on validation failures."""
   det = state.get("deterministic_check")
   report = state.get("validation_report")
 
-  # Priority 1: Check repairable failures
   if det and report:
     repairable = _repairable_failures(det, report)
     if repairable:
-      return repairable[0][0]  # Return the first repairable layer
+      return repairable[0][0]
 
-  # Priority 2: Check deterministic failures
   if det:
     if det.missing_db_tables:
       return "DB"
@@ -501,14 +460,12 @@ def _dominant_layer(state: AgentState) -> str:
     if det.ui_binding_errors:
       return "UI"
 
-  # Priority 3: Check semantic issues by severity
   if report and report.issues:
     order = {"high": 0, "medium": 1, "low": 2}
     top = sorted(report.issues, key=lambda i: order.get(i.severity, 3))[0]
     return top.layer
 
   return "Cross-Layer"
-
 
 def repair_engine_node(state: AgentState) -> AgentState:
   new_state = dict(state)
@@ -547,9 +504,8 @@ def repair_engine_node(state: AgentState) -> AgentState:
 
   resp: RepairPlan = _call(RepairPlan, prompt, f"generating patches for {target}")
 
-  # Log what we're about to patch
   _log(new_state, f"  🔧 Applying {len(resp.patches)} patch(es) to {target} layer")
-  for i, patch in enumerate(resp.patches[:3]):  # Show first 3 patches
+  for i, patch in enumerate(resp.patches[:3]):
     _log(new_state, f"    Patch {i + 1}: {patch.operation} on {patch.target_table_or_route}")
 
   _apply_patches(schemas, resp)
@@ -568,7 +524,6 @@ def repair_engine_node(state: AgentState) -> AgentState:
 
   return new_state
 
-
 def runtime_executor_node(state: AgentState) -> AgentState:
   new_state = dict(state)
   _log(new_state, "\n--- [PASS 5] RUNTIME EXECUTOR ---")
@@ -584,12 +539,11 @@ def runtime_executor_node(state: AgentState) -> AgentState:
     if r.status == "FAIL":
       _log(new_state, f"  ⚠ FAIL [{r.method} {r.route}] → {r.detail}")
 
-  # Boost validation score based on runtime success
   if runtime_report.success_rate >= 70 and new_state.get("validation_report"):
     vr = new_state["validation_report"]
     old_score = vr.consistency_score
     vr.consistency_score = max(old_score, int(runtime_report.success_rate))
-    vr.is_valid = True  # Runtime success overrides
+    vr.is_valid = True
     _log(new_state,
          f"  🚀 Runtime success ({runtime_report.success_rate}%) boosting score from {old_score} to {vr.consistency_score}")
     new_state["validation_report"] = vr
@@ -600,20 +554,17 @@ def runtime_executor_node(state: AgentState) -> AgentState:
   _log(new_state, f"\n🏁 Compilation finished → {new_state['status']}")
   return new_state
 
-
 def validation_router(state: AgentState) -> str:
   if state.get("status") == "VALIDATION_PASSED":
     return "runtime_executor"
 
   repairs = state.get("metrics", {}).get("repairs", 0)
 
-  # Allow more repair cycles (increased from 3 to 5)
   if repairs >= 5:
     _log(state, f"  ⚠ Max repairs ({repairs}) reached. Forcing runtime execution.")
     return "runtime_executor"
 
   return "repair_engine"
-
 
 def schema_sync_node(state: AgentState) -> AgentState:
   new_state = dict(state)
@@ -639,7 +590,6 @@ def schema_sync_node(state: AgentState) -> AgentState:
   _log(new_state, "  ✓ Downstream dependencies resolved and cleaned.")
 
   return new_state
-
 
 graph = StateGraph(AgentState)
 graph.add_node("intent_extractor", intent_extractor_node)
