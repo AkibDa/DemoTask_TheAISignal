@@ -103,7 +103,7 @@ class RepairPlan(BaseModel):
 class EndpointSimResult(BaseModel):
     route: str
     method: str
-    status: str        # "PASS" | "FAIL"
+    status: str
     response_code: int
     detail: str
 

@@ -2,7 +2,6 @@
 
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import HumanMessage
 
 def _retry_kwargs():
   return dict(
